@@ -1,67 +1,63 @@
 'use client';
 
-import { FaHeart, FaComment, FaChevronUp, FaChevronDown, FaShare } from 'react-icons/fa';
+import { useState } from 'react';
+import { AiFillHeart, AiOutlineHeart } from 'react-icons/ai';
 
 interface VideoControlsProps {
-  onLike: () => void;
-  onNext: () => void;
-  onPrevious: () => void;
-  likes: number;
-  hasNext: boolean;
-  hasPrevious: boolean;
+  videoId: string;
+  isAuthenticated: boolean;
+  initialLikes: number;
+  initialLiked: boolean;
+  onLike: (videoId: string, liked: boolean) => void;
 }
 
-export default function VideoControls({
+const VideoControls: React.FC<VideoControlsProps> = ({
+  videoId,
+  isAuthenticated,
+  initialLikes,
+  initialLiked,
   onLike,
-  onNext,
-  onPrevious,
-  likes,
-  hasNext,
-  hasPrevious
-}: VideoControlsProps) {
+}) => {
+  const [liked, setLiked] = useState(initialLiked);
+  const [likeCount, setLikeCount] = useState(initialLikes);
+
+  const handleLikeClick = () => {
+    if (!isAuthenticated) {
+      // If not authenticated, don't change state or call onLike
+      return;
+    }
+
+    const newLikedState = !liked;
+    setLiked(newLikedState);
+    // Update like count: +1 if now liked, -1 if unliked
+    setLikeCount(prev => newLikedState ? prev + 1 : prev - 1);
+    // Callback to parent component
+    onLike(videoId, newLikedState);
+  };
+
   return (
-    <div className="flex flex-col items-center space-y-6">
+    <div className="absolute right-3 bottom-24 flex flex-col items-center z-10">
       <button
-        onClick={onLike}
-        className="flex flex-col items-center"
+        onClick={handleLikeClick}
+        className={`flex flex-col items-center mb-4 rounded-full p-2 ${
+          isAuthenticated ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'
+        }`}
+        disabled={!isAuthenticated}
+        aria-label={liked ? "Unlike video" : "Like video"}
       >
-        <div className="w-10 h-10 bg-black bg-opacity-50 rounded-full flex items-center justify-center mb-1 hover:bg-opacity-70">
-          <FaHeart className="text-xl text-white" />
+        <div className="text-white text-3xl mb-1">
+          {liked ? (
+            <AiFillHeart className="text-red-500" />
+          ) : (
+            <AiOutlineHeart />
+          )}
         </div>
-        <span className="text-xs text-white">{likes}</span>
+        <span className="text-white text-xs">
+          {likeCount > 0 ? likeCount : ''}
+        </span>
       </button>
-      
-      <button className="flex flex-col items-center">
-        <div className="w-10 h-10 bg-black bg-opacity-50 rounded-full flex items-center justify-center mb-1 hover:bg-opacity-70">
-          <FaComment className="text-xl text-white" />
-        </div>
-        <span className="text-xs text-white">Komentarze</span>
-      </button>
-      
-      <button className="flex flex-col items-center">
-        <div className="w-10 h-10 bg-black bg-opacity-50 rounded-full flex items-center justify-center mb-1 hover:bg-opacity-70">
-          <FaShare className="text-xl text-white" />
-        </div>
-        <span className="text-xs text-white">Udostępnij</span>
-      </button>
-      
-      {hasPrevious && (
-        <button
-          onClick={onPrevious}
-          className="w-10 h-10 bg-black bg-opacity-50 rounded-full flex items-center justify-center hover:bg-opacity-70 mt-4"
-        >
-          <FaChevronUp className="text-xl text-white" />
-        </button>
-      )}
-      
-      {hasNext && (
-        <button
-          onClick={onNext}
-          className="w-10 h-10 bg-black bg-opacity-50 rounded-full flex items-center justify-center hover:bg-opacity-70 mt-2"
-        >
-          <FaChevronDown className="text-xl text-white" />
-        </button>
-      )}
     </div>
   );
-} 
+};
+
+export default VideoControls; 

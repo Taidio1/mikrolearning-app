@@ -1,356 +1,359 @@
 'use client';
 
-import { useState, useEffect, useRef, TouchEvent } from 'react';
+import React, { useState, useEffect, useRef, useCallback, TouchEvent } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import { useRouter } from 'next/navigation';
 import supabase from '../../lib/supabase';
-import VideoPlayer from '../../app/components/VideoPlayer';
-import VideoControls from '../../app/components/VideoControls';
-import { FaChevronUp, FaChevronDown } from 'react-icons/fa';
+import VideoPlayer from '../components/VideoPlayer';
+import { FiLoader } from 'react-icons/fi';
 
+// Definicja typów dla filmów
 interface Video {
   id: string;
   title: string;
   video_url: string;
   category: string;
   likes: number;
+  created_at: string;
 }
+
+interface UserLike {
+  id: string;
+  user_id: string;
+  video_id: string;
+  created_at: string;
+}
+
+// Funkcja walidująca URL wideo
+const isValidVideoUrl = (url: string): boolean => {
+  if (!url) return false;
+  if (url === 'Download') return false;
+  
+  // Sprawdź czy URL zawiera rozszerzenie wideo
+  const hasVideoExtension = /\.(mp4|webm|mov|ogg)$/i.test(url);
+  const isFullUrl = url.startsWith('http://') || url.startsWith('https://');
+  
+  // Pełne URL-e zawsze uznajemy za potencjalnie prawidłowe
+  if (isFullUrl) return true;
+  
+  // Dla lokalnych plików wymagamy rozszerzenia wideo lub uznajemy, że można dodać .mp4
+  return true;
+};
 
 export default function VideoPage() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [showCategories, setShowCategories] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [userLikes, setUserLikes] = useState<string[]>([]);
+  const [touchStartY, setTouchStartY] = useState<number | null>(null);
+  
+  const { isLoading, user } = useAuth();
+  const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
-  const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  const PAGE_SIZE = 5;
-  const [touchStart, setTouchStart] = useState<number | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
-
-  // Obsługa dotknięcia ekranu (dla urządzeń mobilnych)
+  
+  // Prevent scrolling on body when component mounts
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    document.body.style.overscrollBehavior = 'none';
+    
+    // Cleanup when component unmounts
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.overscrollBehavior = '';
+    };
+  }, []);
+  
+  // Przekieruj do logowania, jeśli użytkownik nie jest zalogowany
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.push('/login');
+    }
+  }, [isLoading, user, router]);
+  
+  // Touch handlers for swipe navigation
   const handleTouchStart = (e: TouchEvent) => {
-    setTouchStart(e.touches[0].clientY);
+    // Zapisujemy pozycję początkową tylko gdy dotknięto głównego obszaru, nie przycisków kontrolnych
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'BUTTON' || target.closest('button')) {
+      return;
+    }
+    
+    setTouchStartY(e.touches[0].clientY);
   };
-
+  
   const handleTouchEnd = (e: TouchEvent) => {
-    if (touchStart === null) return;
+    if (touchStartY === null) return;
     
-    const touchEnd = e.changedTouches[0].clientY;
-    const diff = touchStart - touchEnd;
-    
-    // Przesunięcie w dół
-    if (diff > 50) {
-      handleNext();
-    }
-    // Przesunięcie w górę
-    else if (diff < -50) {
-      handlePrevious();
+    // Upewniamy się, że interakcja nie była z przyciskiem
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'BUTTON' || target.closest('button')) {
+      return;
     }
     
-    setTouchStart(null);
+    const touchEndY = e.changedTouches[0].clientY;
+    const yDiff = touchStartY - touchEndY;
+    
+    // If the swipe is significant enough (more than 50px)
+    if (Math.abs(yDiff) > 50) {
+      if (yDiff > 0) {
+        // Swipe up - go to next video
+        goToNextVideo();
+      } else {
+        // Swipe down - go to previous video
+        goToPrevVideo();
+      }
+    }
+    
+    setTouchStartY(null);
   };
-
-  // Funkcja do ładowania większej ilości wideo
-  const fetchMoreVideos = async () => {
-    if (!hasMore || loadingMore) return;
-    
-    setLoadingMore(true);
+  
+  // Sprawdź czy plik wideo istnieje
+  const checkVideoExists = useCallback(async (videoUrl: string) => {
+    // Ignoruj pełne URLe zewnętrzne
+    if (videoUrl.startsWith('http://') || videoUrl.startsWith('https://')) {
+      return true;
+    }
     
     try {
-      let query = supabase
+      // Jeśli URL to tylko nazwa pliku, sprawdź czy istnieje w buckecie
+      const fileName = videoUrl.split('/').pop();
+      const { data, error } = await supabase
+        .storage
         .from('videos')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-      
-      if (selectedCategory) {
-        query = query.eq('category', selectedCategory);
-      }
-      
-      const { data, error } = await query;
+        .list('', { 
+          search: fileName 
+        });
       
       if (error) {
-        console.error('Error fetching more videos:', error);
-        return;
+        console.error('Błąd podczas sprawdzania istnienia pliku wideo:', error);
+        return false;
       }
+      
+      return data && data.length > 0;
+    } catch (err) {
+      console.error('Błąd podczas sprawdzania istnienia pliku wideo:', err);
+      return false;
+    }
+  }, []);
+  
+  // Pobierz filmy z Supabase
+  const fetchVideos = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const { data, error } = await supabase
+        .from('videos')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
       
       if (data && data.length > 0) {
-        // Dodaj nowe filmy do istniejącej listy
-        setVideos(prev => [...prev, ...data as Video[]]);
-        setPage(prev => prev + 1);
+        // Filtruj filmy z nieprawidłowymi URL
+        const validVideos = data.filter(video => isValidVideoUrl(video.video_url));
+        
+        // Debugowanie URL wideo
+        console.log('Pobrane filmy:', data.map(v => ({ 
+          id: v.id, 
+          title: v.title, 
+          url: v.video_url,
+          valid: isValidVideoUrl(v.video_url)
+        })));
+        
+        if (validVideos.length === 0) {
+          setVideos([]);
+          setError('Brak prawidłowych filmów do wyświetlenia. Sprawdź URL w bazie danych.');
+        } else {
+          setVideos(validVideos as Video[]);
+        }
+      } else {
+        setVideos([]);
+        setError('Brak filmów do wyświetlenia');
+      }
+    } catch (err) {
+      console.error('Błąd podczas pobierania filmów:', err);
+      setError('Nie można załadować filmów. Spróbuj ponownie później.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  
+  // Pobierz polubione filmy użytkownika
+  const fetchUserLikes = useCallback(async () => {
+    if (!user) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('user_likes')
+        .select('video_id')
+        .eq('user_id', user.id);
+      
+      if (error) throw error;
+      
+      if (data) {
+        setUserLikes(data.map((like: { video_id: string }) => like.video_id));
+      }
+    } catch (err) {
+      console.error('Błąd podczas pobierania polubionych filmów:', err);
+      // Cicho obsługujemy błąd, aby nie przerywać działania aplikacji
+    }
+  }, [user]);
+  
+  // Aktualizuj dane przy zmianie użytkownika
+  useEffect(() => {
+    fetchVideos();
+    fetchUserLikes();
+  }, [fetchVideos, fetchUserLikes]);
+  
+  // Obsługa polubienia filmu
+  const handleLike = async (videoId: string, liked: boolean) => {
+    if (!user || videos.length === 0) return;
+    
+    try {
+      // Aktualizacja stanu lokalnego (optymistyczne renderowanie)
+      if (liked) {
+        if (!userLikes.includes(videoId)) {
+          setUserLikes([...userLikes, videoId]);
+        }
+      } else {
+        setUserLikes(userLikes.filter(id => id !== videoId));
       }
       
-      // Jeśli otrzymaliśmy mniej filmów niż PAGE_SIZE, nie ma więcej do załadowania
-      if (!data || data.length < PAGE_SIZE) {
-        setHasMore(false);
+      // Aktualizacja liczby polubień dla filmu
+      const videoIndex = videos.findIndex(v => v.id === videoId);
+      if (videoIndex >= 0) {
+        const updatedVideos = [...videos];
+        updatedVideos[videoIndex] = {
+          ...updatedVideos[videoIndex],
+          likes: liked 
+            ? updatedVideos[videoIndex].likes + 1 
+            : Math.max(0, updatedVideos[videoIndex].likes - 1)
+        };
+        setVideos(updatedVideos);
       }
-    } catch (error) {
-      console.error('Unexpected error fetching more videos:', error);
-    } finally {
-      setLoadingMore(false);
+      
+      // Zapisanie zmiany w bazie danych
+      if (!liked) {
+        // Usuń polubienie
+        await supabase
+          .from('user_likes')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('video_id', videoId);
+      } else {
+        // Dodaj polubienie
+        await supabase
+          .from('user_likes')
+          .insert([{ user_id: user.id, video_id: videoId }]);
+      }
+      
+      // Aktualizacja liczby polubień filmu w bazie danych
+      await supabase
+        .from('videos')
+        .update({ likes: videos.find(v => v.id === videoId)?.likes || 0 })
+        .eq('id', videoId);
+        
+    } catch (err) {
+      console.error('Błąd podczas aktualizacji polubienia:', err);
+      // Cofnij zmiany w przypadku błędu
+      fetchUserLikes();
+      fetchVideos();
     }
   };
-
-  // Załaduj początkowe wideo
-  useEffect(() => {
-    async function fetchInitialVideos() {
-      setLoading(true);
-      setVideos([]);
-      setPage(0);
-      setHasMore(true);
-      
-      try {
-        let query = supabase
-          .from('videos')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .range(0, PAGE_SIZE - 1);
-        
-        if (selectedCategory) {
-          query = query.eq('category', selectedCategory);
-        }
-        
-        const { data, error } = await query;
-        
-        if (error) {
-          console.error('Error fetching videos:', error);
-          return;
-        }
-        
-        if (data) {
-          setVideos(data as Video[]);
-          setPage(1);
-          
-          // Jeśli otrzymaliśmy mniej filmów niż PAGE_SIZE, nie ma więcej do załadowania
-          if (data.length < PAGE_SIZE) {
-            setHasMore(false);
-          }
-          
-          // Pobierz kategorie
-          const { data: allVideos } = await supabase.from('videos').select('category');
-          if (allVideos) {
-            const uniqueCategories = Array.from(
-              new Set(allVideos.map((video: any) => video.category))
-            );
-            setCategories(uniqueCategories as string[]);
-          }
-        }
-      } catch (error) {
-        console.error('Unexpected error:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
-    
-    fetchInitialVideos();
-  }, [selectedCategory]);
-
-  // Automatycznie załaduj więcej wideo, gdy zbliżamy się do końca
-  useEffect(() => {
-    if (videos.length > 0 && currentVideoIndex >= videos.length - 2 && hasMore) {
-      fetchMoreVideos();
-    }
-  }, [currentVideoIndex, videos.length, hasMore]);
-
-  const handleNext = () => {
+  
+  // Nawigacja do następnego filmu
+  const goToNextVideo = () => {
     if (currentVideoIndex < videos.length - 1) {
       setCurrentVideoIndex(currentVideoIndex + 1);
     }
   };
-
-  const handlePrevious = () => {
+  
+  // Nawigacja do poprzedniego filmu
+  const goToPrevVideo = () => {
     if (currentVideoIndex > 0) {
       setCurrentVideoIndex(currentVideoIndex - 1);
     }
   };
-
-  const handleSwipeUp = () => {
-    handleNext();
-  };
-
-  const handleSwipeDown = () => {
-    handlePrevious();
-  };
-
-  const handleLike = async (videoId: string) => {
-    // Increment likes in database
-    const { data, error } = await supabase
-      .from('videos')
-      .update({ likes: videos[currentVideoIndex].likes + 1 })
-      .eq('id', videoId);
-      
-    if (error) {
-      console.error('Error liking video:', error);
-      return;
-    }
-    
-    // Update local state
-    const updatedVideos = [...videos];
-    updatedVideos[currentVideoIndex].likes += 1;
-    setVideos(updatedVideos);
-  };
-
-  const handleCategorySelect = (category: string | null) => {
-    setSelectedCategory(category);
-    setCurrentVideoIndex(0);
-    setShowCategories(false);
-  };
-
-  // Obsługa przewijania kółkiem myszy
-  useEffect(() => {
-    const handleWheel = (e: WheelEvent) => {
-      if (e.deltaY > 0) {
-        handleNext();
-      } else {
-        handlePrevious();
-      }
-    };
-
-    const container = containerRef.current;
-    if (container) {
-      container.addEventListener('wheel', handleWheel);
-    }
-
-    return () => {
-      if (container) {
-        container.removeEventListener('wheel', handleWheel);
-      }
-    };
-  }, [currentVideoIndex]);
-
-  if (loading) {
+  
+  // Jeśli trwa ładowanie danych autoryzacji, pokaż komunikat ładowania
+  if (isLoading) {
     return (
-      <div className="flex justify-center items-center min-h-screen bg-black">
-        <div className="animate-pulse text-white text-xl">Ładowanie filmów...</div>
+      <div className="flex items-center justify-center h-screen">
+        <FiLoader className="animate-spin text-4xl text-primary" />
       </div>
     );
   }
-
-  if (videos.length === 0) {
-    return (
-      <div className="flex flex-col justify-center items-center min-h-screen p-4 bg-black text-white">
-        <h2 className="text-2xl mb-4">Brak dostępnych filmów</h2>
-        {selectedCategory && (
-          <button 
-            onClick={() => handleCategorySelect(null)}
-            className="py-2 px-4 bg-blue-600 text-white rounded-md"
-          >
-            Pokaż wszystkie filmy
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  const currentVideo = videos[currentVideoIndex];
-
+  
   return (
-    <div className="flex flex-col min-h-screen bg-black text-white pb-16 relative">
-      {/* Category toggle */}
-      <button
-        onClick={() => setShowCategories(!showCategories)}
-        className="absolute top-2 right-2 z-50 bg-black bg-opacity-50 p-2 rounded-full"
-      >
-        {showCategories ? <FaChevronUp /> : <FaChevronDown />}
-      </button>
-      
-      {/* Category selector */}
-      {showCategories && (
-        <div className="absolute top-12 right-2 z-50 bg-black bg-opacity-80 p-3 rounded-lg max-w-[200px] backdrop-blur-sm">
-          <div className="space-y-2">
-            <button 
-              className={`block px-3 py-1 w-full text-left rounded-md text-sm ${!selectedCategory ? 'bg-blue-600' : 'bg-gray-800'}`}
-              onClick={() => handleCategorySelect(null)}
-            >
-              Wszystkie
-            </button>
-            
-            {categories.map((category) => (
-              <button 
-                key={category}
-                className={`block px-3 py-1 w-full text-left rounded-md text-sm ${selectedCategory === category ? 'bg-blue-600' : 'bg-gray-800'}`}
-                onClick={() => handleCategorySelect(category)}
-              >
-                {category}
-              </button>
-            ))}
+    <div 
+      className="flex flex-col h-screen w-full overflow-hidden bg-black touch-none"
+      ref={containerRef}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
+      {/* Główny obszar wideo */}
+      <div className="flex-1 relative">
+        {loading ? (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <FiLoader className="animate-spin text-4xl text-primary" />
           </div>
-        </div>
-      )}
-      
-      {/* Video player - z obsługą dotyku */}
-      <div 
-        className="flex-1 flex flex-col" 
-        ref={containerRef}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-      >
-        {currentVideo && (
-          <div className="relative h-full w-full">
-            {/* Swipe areas */}
-            <div 
-              className="absolute top-0 left-0 w-full h-1/3 z-10" 
-              onClick={handleSwipeDown}
-            />
-            <div 
-              className="absolute bottom-0 left-0 w-full h-1/3 z-10" 
-              onClick={handleSwipeUp}
-            />
-
-            {/* Video */}
-            <div className="absolute inset-0 flex flex-col">
-              <div className="flex-1 bg-black flex items-center justify-center overflow-hidden">
-                <VideoPlayer url={currentVideo.video_url} />
-              </div>
-              
-              <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black to-transparent">
-                <h2 className="text-xl font-semibold mb-1">{currentVideo.title}</h2>
-                <p className="text-gray-300 text-sm">{currentVideo.category}</p>
-              </div>
-              
-              <div className="absolute right-4 bottom-24 flex flex-col items-center space-y-8">
-                <VideoControls 
-                  onLike={() => handleLike(currentVideo.id)}
-                  onNext={handleNext}
-                  onPrevious={handlePrevious}
-                  likes={currentVideo.likes}
-                  hasNext={currentVideoIndex < videos.length - 1}
-                  hasPrevious={currentVideoIndex > 0}
-                />
-              </div>
+        ) : error ? (
+          <div className="absolute inset-0 flex items-center justify-center text-center p-4">
+            <div className="bg-gray-800/90 p-6 rounded-lg max-w-md">
+              <p className="text-gray-200">{error}</p>
+              <button 
+                onClick={() => fetchVideos()}
+                className="mt-4 bg-primary text-white px-4 py-2 rounded-full"
+              >
+                Odśwież
+              </button>
             </div>
           </div>
-        )}
-        
-        {/* Wskaźnik ładowania następnych filmów */}
-        {loadingMore && (
-          <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2">
-            <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+        ) : videos.length > 0 ? (
+          <div className="absolute inset-0">
+            <VideoPlayer
+              key={videos[currentVideoIndex].id}
+              videoId={videos[currentVideoIndex].id}
+              title={videos[currentVideoIndex].title}
+              videoUrl={videos[currentVideoIndex].video_url}
+              isAuthenticated={!!user}
+              likes={videos[currentVideoIndex].likes}
+              userLiked={userLikes.includes(videos[currentVideoIndex].id)}
+              onLike={handleLike}
+              onVideoEnded={goToNextVideo}
+            />
+            
+            {/* Video debug info in development */}
+            {process.env.NODE_ENV === 'development' && (
+              <div className="absolute bottom-48 left-4 right-4 bg-black/50 p-2 rounded text-xs text-white z-10 overflow-hidden">
+                <details>
+                  <summary>Debug info</summary>
+                  <p className="truncate">URL: {videos[currentVideoIndex].video_url}</p>
+                  <p>ID: {videos[currentVideoIndex].id}</p>
+                </details>
+              </div>
+            )}
+            
+            {/* Swipe indicator when on first or last video */}
+            {currentVideoIndex === 0 && (
+              <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/30 px-3 py-1 rounded-full text-white text-xs z-10">
+                Przesuń w górę dla następnego
+              </div>
+            )}
+            {currentVideoIndex === videos.length - 1 && (
+              <div className="absolute top-24 left-1/2 -translate-x-1/2 bg-black/30 px-3 py-1 rounded-full text-white text-xs z-10">
+                Przesuń w dół dla poprzedniego
+              </div>
+            )}
+            
+            {/* Video counter */}
+            <div className="absolute top-4 right-4 bg-black/50 px-2 py-1 rounded text-xs text-white z-10">
+              {currentVideoIndex + 1} / {videos.length}
+            </div>
           </div>
-        )}
-      </div>
-      
-      {/* Progress bar */}
-      <div className="absolute bottom-16 left-0 w-full px-4">
-        <div className="bg-gray-700 h-1 w-full rounded-full overflow-hidden">
-          <div 
-            className="bg-white h-full rounded-full" 
-            style={{ width: `${((currentVideoIndex + 1) / (videos.length + (hasMore ? 5 : 0))) * 100}%` }}
-          />
-        </div>
-        <div className="text-xs text-gray-400 mt-1 text-center">
-          {currentVideoIndex + 1} / {videos.length}{hasMore && '+'} 
-        </div>
-      </div>
-      
-      {/* Instrukcje przewijania */}
-      <div className="absolute left-4 top-1/2 transform -translate-y-1/2 text-white text-opacity-50 text-xs uppercase bg-black bg-opacity-30 py-1 px-2 rounded-full">
-        <div className="flex flex-col items-center">
-          <FaChevronUp className="mb-1" />
-          <span>Przewiń</span>
-          <FaChevronDown className="mt-1" />
-        </div>
+        ) : null}
       </div>
     </div>
   );
