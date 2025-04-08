@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import supabase from '../../lib/supabase';
 import VideoPlayer from '../components/VideoPlayer';
 import { FiLoader } from 'react-icons/fi';
+import VideoUploader from '../components/VideoUploader';
 
 // Definicja typów dla filmów
 interface Video {
@@ -277,6 +278,11 @@ export default function VideoPage() {
     }
   };
   
+  // Dodaję funkcję odświeżania listy filmów po wgraniu nowego
+  const handleUploadSuccess = () => {
+    fetchVideos();
+  };
+  
   // Jeśli trwa ładowanie danych autoryzacji, pokaż komunikat ładowania
   if (isLoading) {
     return (
@@ -352,6 +358,13 @@ export default function VideoPage() {
             <div className="absolute top-4 right-4 bg-black/50 px-2 py-1 rounded text-xs text-white z-10">
               {currentVideoIndex + 1} / {videos.length}
             </div>
+
+            {/* Upload button - tylko dla zalogowanych użytkowników */}
+            {user && (
+              <div className="absolute top-4 left-4 z-10">
+                <VideoUploader onSuccess={handleUploadSuccess} />
+              </div>
+            )}
           </div>
         ) : null}
       </div>
