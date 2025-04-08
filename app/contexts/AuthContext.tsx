@@ -13,6 +13,8 @@ interface AuthContextType {
   signUp: (email: string, password: string, username: string) => Promise<{ error: any, user: User | null }>;
   signOut: () => Promise<void>;
   refreshSession: () => Promise<void>;
+  likeVideo: (videoId: string) => Promise<boolean>;
+  getLikedVideos: () => Promise<string[]>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -21,6 +23,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [likedVideos, setLikedVideos] = useState<string[]>([]);
   const router = useRouter();
 
   // Funkcja do pobierania aktualnej sesji
@@ -216,6 +219,95 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Pobierz polubione filmy
+  const getLikedVideos = async (): Promise<string[]> => {
+    if (!user) return [];
+
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('liked_videos')
+        .eq('id', user.id)
+        .single();
+
+      if (error) {
+        console.error('Błąd pobierania polubionych filmów:', error);
+        return [];
+      }
+
+      if (data && data.liked_videos) {
+        setLikedVideos(data.liked_videos);
+        return data.liked_videos;
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('Nieoczekiwany błąd:', error);
+      return [];
+    }
+  };
+
+  // Funkcja do polubienia filmu
+  const likeVideo = async (videoId: string): Promise<boolean> => {
+    if (!user) return false;
+
+    try {
+      // Najpierw pobierz aktualne polubione filmy
+      const currentLikedVideos = await getLikedVideos();
+      
+      // Sprawdź, czy film jest już polubiony
+      const isAlreadyLiked = currentLikedVideos.includes(videoId);
+      
+      // Aktualizuj listę polubionych filmów
+      let updatedLikedVideos: string[];
+      
+      if (isAlreadyLiked) {
+        // Usuń z listy polubionych
+        updatedLikedVideos = currentLikedVideos.filter(id => id !== videoId);
+      } else {
+        // Dodaj do listy polubionych
+        updatedLikedVideos = [...currentLikedVideos, videoId];
+      }
+      
+      // Zaktualizuj stan lokalny
+      setLikedVideos(updatedLikedVideos);
+      
+      // Zapisz w bazie danych
+      const { error } = await supabase
+        .from('users')
+        .update({ liked_videos: updatedLikedVideos })
+        .eq('id', user.id);
+        
+      if (error) {
+        console.error('Błąd aktualizacji polubionych filmów:', error);
+        return false;
+      }
+      
+      // Jeśli dodajemy nowe polubienie, zaktualizuj również licznik polubień filmu
+      if (!isAlreadyLiked) {
+        const { error: videoUpdateError } = await supabase.rpc('increment_video_likes', {
+          video_id: videoId
+        });
+        
+        if (videoUpdateError) {
+          console.error('Błąd aktualizacji licznika polubień:', videoUpdateError);
+        }
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Nieoczekiwany błąd podczas polubienia filmu:', error);
+      return false;
+    }
+  };
+
+  // Pobierz polubione filmy przy ładowaniu kontekstu
+  useEffect(() => {
+    if (user) {
+      getLikedVideos();
+    }
+  }, [user]);
+
   const value = {
     user,
     session,
@@ -223,7 +315,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signIn,
     signUp,
     signOut,
-    refreshSession
+    refreshSession,
+    likeVideo,
+    getLikedVideos
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
