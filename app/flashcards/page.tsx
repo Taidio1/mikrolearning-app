@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import supabase from '../../lib/supabase';
 import ExpandableFlashcard from '../components/ExpandableFlashcard';
 import { useAuth } from '../contexts/AuthContext';
-import { FaCheckCircle } from 'react-icons/fa';
+import { FaCheckCircle, FaFilter, FaRandom } from 'react-icons/fa';
 
 interface Flashcard {
   id: string;
@@ -23,6 +23,9 @@ export default function FlashcardsPage() {
   const [learnedFlashcards, setLearnedFlashcards] = useState<string[]>([]);
   const [showLearned, setShowLearned] = useState(false);
   const { user } = useAuth();
+  const [showFilterPopup, setShowFilterPopup] = useState(false);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const filterPopupRef = useRef<HTMLDivElement>(null);
   
   // Liczba kart na stronie
   const CARDS_PER_PAGE = 4;
@@ -55,6 +58,8 @@ export default function FlashcardsPage() {
             new Set(flashcardsData.map((card: any) => card.category))
           );
           setCategories(uniqueCategories as string[]);
+          // Ustaw domyślnie wszystkie kategorie jako wybrane
+          setSelectedCategories(uniqueCategories as string[]);
         }
         
         // Najpierw sprawdź localStorage na wypadek problemów z DB
@@ -90,6 +95,20 @@ export default function FlashcardsPage() {
     
     fetchData();
   }, [selectedCategory, user]);
+
+  // Obsługa kliknięcia poza popupem
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (filterPopupRef.current && !filterPopupRef.current.contains(event.target as Node)) {
+        setShowFilterPopup(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   // Funkcja oznaczająca fiszkę jako nauczoną
   const handleMarkAsLearned = async (flashcardId: string) => {
@@ -180,24 +199,70 @@ export default function FlashcardsPage() {
   };
 
   const handleCategorySelect = (category: string | null) => {
+    // Resetujemy filtr kategorii z checkboxów podczas używania starego systemu
+    setSelectedCategories([]);
     setSelectedCategory(category);
     setCurrentPage(0);
   };
 
   const shuffleCards = () => {
-    const shuffled = [...flashcards].sort(() => Math.random() - 0.5);
+    // Filtrowanie kart według wybranych kategorii przed tasowaniem
+    let cardsToShuffle = [...flashcards];
+    
+    if (selectedCategories.length > 0) {
+      cardsToShuffle = cardsToShuffle.filter(card => 
+        selectedCategories.includes(card.category)
+      );
+    }
+    
+    const shuffled = cardsToShuffle.sort(() => Math.random() - 0.5);
     setFlashcards(shuffled);
     setCurrentPage(0);
+    setShowFilterPopup(false);
+  };
+
+  const handleCategoryCheckbox = (category: string) => {
+    setSelectedCategories(prev => {
+      if (prev.includes(category)) {
+        return prev.filter(cat => cat !== category);
+      } else {
+        return [...prev, category];
+      }
+    });
+  };
+
+  const handleSelectAllCategories = () => {
+    if (selectedCategories.length === categories.length) {
+      setSelectedCategories([]);
+    } else {
+      setSelectedCategories([...categories]);
+    }
   };
 
   // Filtrowanie fiszek na podstawie stanu "już umiem"
   const getVisibleFlashcards = () => {
+    let filteredCards = [...flashcards];
+    
+    // Filtrowanie po kategoriach jeśli są wybrane
+    if (selectedCategories.length > 0) {
+      filteredCards = filteredCards.filter(card => 
+        selectedCategories.includes(card.category)
+      );
+    } 
+    // Jeśli jest wybrana pojedyncza kategoria (stary system filtrowania)
+    else if (selectedCategory) {
+      filteredCards = filteredCards.filter(card => 
+        card.category === selectedCategory
+      );
+    }
+    
+    // Filtrowanie po stanie "nauczonych"
     if (showLearned) {
       // Pokaż tylko nauczone fiszki
-      return flashcards.filter(card => learnedFlashcards.includes(card.id));
+      return filteredCards.filter(card => learnedFlashcards.includes(card.id));
     } else {
-      // Pokaż wszystkie lub filtruj te, które nie są nauczone
-      return flashcards;
+      // Pokaż wszystkie po filtrach
+      return filteredCards;
     }
   };
 
@@ -253,12 +318,61 @@ export default function FlashcardsPage() {
     <div className="flex flex-col min-h-screen pb-20 p-4">
       {/* Top controls */}
       <div className="flex flex-wrap justify-between items-center mb-4 gap-2">
-        <button 
-          onClick={shuffleCards}
-          className="py-2 px-4 bg-blue-600 text-white rounded-md"
-        >
-          Losuj fiszki
-        </button>
+        <div className="relative">
+          <button 
+            onClick={() => setShowFilterPopup(!showFilterPopup)}
+            className="py-2 px-4 bg-blue-600 text-white rounded-md flex items-center"
+          >
+            <FaFilter className="mr-2" />
+            Filtry i losowanie
+          </button>
+          
+          {showFilterPopup && (
+            <div 
+              ref={filterPopupRef}
+              className="absolute z-10 mt-2 w-64 bg-white shadow-lg rounded-md p-4 border border-gray-200"
+            >
+              <h3 className="text-lg font-medium mb-3 text-blue-700">Filtry kategorii</h3>
+              
+              {/* Checkbox dla wszystkich kategorii */}
+              <div className="mb-3">
+                <label className="flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={selectedCategories.length === categories.length}
+                    onChange={handleSelectAllCategories}
+                    className="mr-2 h-4 w-4" 
+                  />
+                  <span className="font-medium text-blue-600">Wszystkie kategorie</span>
+                </label>
+              </div>
+              
+              <div className="max-h-60 overflow-y-auto mb-4">
+                {categories.map(category => (
+                  <div key={category} className="mb-2">
+                    <label className="flex items-center cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedCategories.includes(category)}
+                        onChange={() => handleCategoryCheckbox(category)}
+                        className="mr-2 h-4 w-4" 
+                      />
+                      <span className="text-blue-500">{category}</span>
+                    </label>
+                  </div>
+                ))}
+              </div>
+              
+              <button 
+                onClick={shuffleCards}
+                className="w-full py-2 bg-blue-600 text-white rounded-md flex items-center justify-center"
+              >
+                <FaRandom className="mr-2" />
+                Losuj fiszki
+              </button>
+            </div>
+          )}
+        </div>
         
         <button 
           onClick={() => setShowLearned(!showLearned)}
@@ -273,12 +387,24 @@ export default function FlashcardsPage() {
       
       {/* Stats */}
       <div className="flex justify-between mb-4 text-sm text-gray-600">
-        <div>Wszystkich: {flashcards.length}</div>
+        <div>
+          Wszystkich: {visibleFlashcards.length}/{flashcards.length}
+          {selectedCategories.length > 0 && ` (filtrowane)`}
+        </div>
         <div className="flex items-center">
           <FaCheckCircle className="mr-1 text-green-500" />
           Nauczonych: {learnedCount} ({Math.round((learnedCount / flashcards.length) * 100) || 0}%)
         </div>
       </div>
+      
+      {/* Informacja o aktywnych filtrach */}
+      {selectedCategories.length > 0 && selectedCategories.length < categories.length && (
+        <div className="mb-4 p-2 bg-blue-50 rounded-md">
+          <p className="text-sm text-blue-700">
+            Aktywne filtry: {selectedCategories.join(', ')}
+          </p>
+        </div>
+      )}
       
       {/* Flashcards container */}
       <div className="flex-1">
@@ -321,29 +447,6 @@ export default function FlashcardsPage() {
         >
           Następna
         </button>
-      </div>
-      
-      {/* Category selector */}
-      <div className="mb-4 overflow-x-auto whitespace-nowrap pb-4 scrollbar-hide">
-        <h3 className="text-sm font-medium mb-2 text-center">Kategorie:</h3>
-        <div className="flex flex-wrap justify-center gap-2">
-          <button 
-            className={`px-3 py-1 rounded-full text-sm ${!selectedCategory ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800'}`}
-            onClick={() => handleCategorySelect(null)}
-          >
-            Wszystkie
-          </button>
-          
-          {categories.map((category) => (
-            <button 
-              key={category}
-              className={`px-3 py-1 rounded-full text-sm ${selectedCategory === category ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800'}`}
-              onClick={() => handleCategorySelect(category)}
-            >
-              {category}
-            </button>
-          ))}
-        </div>
       </div>
     </div>
   );
