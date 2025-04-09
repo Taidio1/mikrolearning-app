@@ -24,7 +24,7 @@ const VideoList: React.FC<VideoListProps> = ({ videos }) => {
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
-  const videoRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const videoRefs = useRef<Array<HTMLDivElement | null>>([]);
 
   // Handle case when no videos are available
   if (!videos || videos.length === 0) {
@@ -80,11 +80,11 @@ const VideoList: React.FC<VideoListProps> = ({ videos }) => {
   };
 
   // Handle like for a video
-  const handleLike = (videoId: string) => {
+  const handleLike = (videoId: string, liked: boolean = true) => {
     if (!isAuthenticated) return;
     
     // In a real app, you would call API to update likes
-    console.log('Like video:', videoId);
+    console.log('Like video:', videoId, 'liked:', liked);
     
     // You could also update local state of videos with optimistic update
     // Update would include API call to your backend
@@ -98,13 +98,21 @@ const VideoList: React.FC<VideoListProps> = ({ videos }) => {
       {videos.map((video, index) => (
         <div 
           key={video.id}
-          ref={el => videoRefs.current[index] = el}
+          ref={(el: HTMLDivElement | null) => {
+            videoRefs.current[index] = el;
+          }}
           className="h-screen w-full snap-start relative overflow-hidden"
         >
           <VideoPlayer 
-            url={video.url}
-            isPlaying={isPlaying && currentVideoIndex === index}
-            onClick={handleVideoClick}
+            videoId={video.id}
+            title={video.title}
+            videoUrl={video.url}
+            isAuthenticated={isAuthenticated}
+            likes={video.likes}
+            userLiked={video.userLiked}
+            autoPlay={isPlaying && currentVideoIndex === index}
+            onLike={(videoId, liked) => handleLike(videoId)}
+            onVideoEnded={() => {}}
           />
           
           {/* Video Info Overlay - Bottom Left */}
@@ -120,10 +128,10 @@ const VideoList: React.FC<VideoListProps> = ({ videos }) => {
           {/* Video Controls - Right Side */}
           <VideoControls 
             videoId={video.id}
-            likes={video.likes}
-            userLiked={video.userLiked}
+            initialLikes={video.likes}
+            initialLiked={video.userLiked || false}
             isAuthenticated={isAuthenticated}
-            onLike={() => handleLike(video.id)}
+            onLike={(videoId, liked) => handleLike(videoId)}
           />
         </div>
       ))}

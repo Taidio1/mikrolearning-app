@@ -5,6 +5,12 @@
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 
+// Dodaj deklarację typów dla Deno
+// @ts-ignore -- Ignoruj błędy typu dla funkcji Deno w środowisku Next.js
+declare const Deno: {
+  serve: (handler: (req: Request) => Promise<Response> | Response) => void;
+};
+
 console.log("Hello from Functions!")
 
 Deno.serve(async (req) => {

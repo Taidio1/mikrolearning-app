@@ -72,16 +72,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       // Resetujemy licznik ponownych prób przy zmianie URL
       setRetryCount(0);
-      
+
       const formattedUrl = formatStorageUrl(videoUrl);
-      
+
       // Jeśli formatStorageUrl zwróciło pusty string, znaczy że URL jest nieprawidłowy
       if (!formattedUrl) {
         setError(`Nie można sformatować URL wideo: "${videoUrl}". Sprawdź dane w bazie.`);
         setIsLoading(false);
         return;
       }
-      
+
       console.log('VideoPlayer: Formatted URL:', { original: videoUrl, formatted: formattedUrl });
       setVideoSrc(formattedUrl);
       setError(null);
@@ -94,7 +94,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   useEffect(() => {
     if (!videoSrc) return;
-    
+
     if (videoRef.current) {
       if (isPlaying) {
         // Zawsze odtwarzamy z wyciszonym dźwiękiem przy pierwszym odtworzeniu
@@ -102,18 +102,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           videoRef.current.muted = true;
           setIsMuted(true);
         }
-        
+
         // Sprawdź, czy strona jest aktywna przed odtwarzaniem
         const isDocumentVisible = !document.hidden;
-        
+
         if (isDocumentVisible) {
           videoRef.current.play().catch(err => {
             console.error('Video playback error:', err);
-            
+
             // Obsługa błędu związanego z oszczędzaniem energii
             if (err.message && err.message.includes('play() request was interrupted')) {
               console.log('Power saving error detected, will retry when page is visible');
-              
+
               // Nie zmieniamy stanu isPlaying, aby automatycznie ponowić próbę
               // gdy strona ponownie stanie się aktywna
             } else {
@@ -142,10 +142,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         });
       }
     };
-    
+
     // Dodajemy nasłuchiwacz
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
+
     // Sprzątanie
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -180,16 +180,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const handleVideoError = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
     const videoElement = e.currentTarget;
-    
+
     // Bezpieczne logowanie błędu - zabezpieczenie przed pustym obiektem
     try {
       console.error('VideoPlayer: Video error:', videoElement.error || 'Empty error object');
     } catch (err) {
       console.error('VideoPlayer: Error while logging video error');
     }
-    
+
     let errorMessage = 'Błąd podczas ładowania wideo.';
-    
+
     if (videoElement.error) {
       switch (videoElement.error.code) {
         case MediaError.MEDIA_ERR_ABORTED:
@@ -210,12 +210,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     } else {
       // Handle case where error object is null or empty
       errorMessage = 'Nie można załadować wideo. Sprawdź czy plik istnieje i jest dostępny.';
-      
+
       // Dodatkowa diagnoza specyficzna dla problemu z pustym obiektem błędu
       if (videoSrc.includes('supabase')) {
         // Sprawdzenie, czy URL zawiera specyficzne rozszerzenie pliku
         const hasVideoExtension = /\.(mp4|webm|mov|ogg)$/i.test(videoSrc);
-        
+
         if (!hasVideoExtension) {
           errorMessage = 'URL wideo nie ma rozszerzenia pliku. Spróbuj dodać .mp4 do nazwy pliku w bazie danych.';
         } else {
@@ -225,21 +225,21 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         errorMessage = 'Brak źródła wideo.';
       }
     }
-    
+
     setIsLoading(false);
     setError(errorMessage);
-    
+
     // Auto-retry loading if under max retry count
     if (retryCount < maxRetries) {
       console.log(`VideoPlayer: Auto-retrying (${retryCount + 1}/${maxRetries})...`);
       setRetryCount(prev => prev + 1);
-      
+
       // Auto-retry with delay
       setTimeout(() => {
         handleRetry(new Event('auto-retry') as unknown as React.MouseEvent);
       }, 1000);
     }
-    
+
     // Wyświetl dodatkowe informacje o URL w konsoli
     console.log('VideoPlayer: URL details:', {
       original: videoUrl,
@@ -249,16 +249,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       videoExtension: videoSrc ? videoSrc.split('.').pop() : 'none'
     });
   };
-  
+
   // Funkcja ponownego załadowania wideo
   const handleRetry = (e: React.MouseEvent) => {
     if (e.stopPropagation) {
       e.stopPropagation();
     }
-    
+
     setIsLoading(true);
     setError(null);
-    
+
     // Spróbuj ponownie załadować wideo po krótkim opóźnieniu
     setTimeout(() => {
       const video = videoRef.current;
@@ -315,7 +315,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   <p>Próby: {retryCount}/{maxRetries}</p>
                 </details>
               )}
-              <button 
+              <button
                 onClick={handleRetry}
                 className="mt-4 bg-primary text-white px-4 py-2 rounded-full flex items-center mx-auto"
               >
@@ -327,7 +327,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         {/* Video element */}
         {videoSrc && (
-          <video 
+          <video
             ref={videoRef}
             className="w-full h-full object-contain"
             playsInline
@@ -344,8 +344,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             <source src={videoSrc} type={getMimeType(videoSrc)} />
             {/* Dodatkowe źródło dla .webm jeśli URL wskazuje na mp4 */}
             {videoSrc.endsWith('.mp4') && (
-              <source 
-                src={videoSrc.replace('.mp4', '.webm')} 
+              <source
+                src={videoSrc.replace('.mp4', '.webm')}
                 type="video/webm"
               />
             )}
@@ -355,7 +355,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         {/* Play/Pause overlay - only visible when video is paused */}
         {!isPlaying && !isLoading && !error && (
-          <div 
+          <div
             className="absolute inset-0 flex items-center justify-center bg-black/30 z-10"
             onClick={togglePlay}
           >
@@ -365,7 +365,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         {/* Volume control */}
         {!error && (
-          <button 
+          <button
             onClick={toggleMute}
             className="absolute bottom-24 right-4 z-20 bg-black/30 rounded-full p-2 text-white"
             aria-label={isMuted ? "Włącz dźwięk" : "Wycisz"}
@@ -398,4 +398,4 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   );
 };
 
-export default VideoPlayer; 
+export default VideoPlayer;
