@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { FaVideo, FaBook, FaCog } from 'react-icons/fa';
+import { FaVideo, FaBook, FaCog, FaSignOutAlt } from 'react-icons/fa';
 import { useAuth } from '../contexts/AuthContext';
 import supabase from '../../lib/supabase';
 
@@ -16,7 +16,7 @@ interface UserProfile {
 }
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [likedVideos, setLikedVideos] = useState<any[]>([]);
@@ -206,6 +206,16 @@ export default function ProfilePage() {
             ))}
           </div>
         )}
+      </div>
+      
+      <div className="bg-gray-900 rounded-lg shadow-md p-6 mt-4">
+        <button 
+          onClick={signOut}
+          className="w-full flex items-center justify-center py-3 px-4 bg-red-600 hover:bg-red-700 text-white rounded-md transition"
+        >
+          <FaSignOutAlt className="mr-2" />
+          Wyloguj się
+        </button>
       </div>
     </div>
   );
